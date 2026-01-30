@@ -1,62 +1,45 @@
-const express = require("express");
-const cors = require("cors");
-const { Agent } = require("undici");
+import express from "express";
+import NodeCache from "node-cache";
+import cors from "cors";
 
 const app = express();
 const PORT = 3000;
 
-// ===== Undici dispatcher (RẤT QUAN TRỌNG) =====
-const dispatcher = new Agent({
-    keepAliveTimeout: 0,
-    keepAliveMaxTimeout: 0,
-    connections: 1
-});
-
-// ===== Middleware =====
+const cache = new NodeCache({ stdTTL: 300 });
 app.use(cors());
 
-// ===== ROUTE TEST SJC =====
+const SJC_API =
+    "https://sjc.com.vn/GoldPrice/Services/PriceService.ashx";
+
 app.get("/api/gold/sjc", async (req, res) => {
     try {
-        const response = await fetch(
-            "https://sjc.com.vn/GoldPrice/Services/PriceService.ashx",
-            {
-                dispatcher,
-                headers: {
-                    "User-Agent":
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                    "Accept": "application/json",
-                    "Accept-Language": "vi-VN,vi;q=0.9",
-                    "Connection": "close"
-                }
+        const cached = cache.get("sjc_price");
+        if (cached) return res.json(cached);
+
+        const response = await fetch(SJC_API, {
+            headers: {
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json"
             }
-        );
+        });
 
         const text = await response.text();
+        if (!text) throw new Error("Empty response");
 
-        if (!text) {
-            throw new Error("Empty response from SJC");
-        }
+        const json = JSON.parse(text);
 
-        // thử parse JSON
-        const data = JSON.parse(text);
+        const result = {
+            updatedAt: json.latestDate,
+            items: json.data
+        };
 
-        res.json({
-            success: true,
-            source: "sjc",
-            data
-        });
+        cache.set("sjc_price", result);
+        res.json(result);
     } catch (err) {
-        console.error("❌ SJC error:", err.message);
-
-        res.status(500).json({
-            success: false,
-            error: err.message
-        });
+        res.status(500).json({ error: err.message });
     }
 });
 
-// ===== START SERVER =====
 app.listen(PORT, () => {
     console.log(`✅ Server running at http://localhost:${PORT}`);
 });
